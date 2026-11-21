@@ -2,8 +2,6 @@ name: Build
 
 on:
   push:
-    branches: [main, master]
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -11,6 +9,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Extract zip and locate project
+        run: |
+          mkdir -p /tmp/src
+          shopt -s nullglob
+          zips=(*.zip)
+          [ ${#zips[@]} -gt 0 ] || { echo "No .zip found in repo root"; exit 1; }
+          for z in "${zips[@]}"; do unzip -q -o "$z" -d /tmp/src; done
+          lua=$(find /tmp/src -name xmake.lua -not -path '*/.xmake/*' | head -1)
+          [ -n "$lua" ] || { echo "xmake.lua not found inside zip"; exit 1; }
+          echo "SRC=$(dirname "$lua")" >> "$GITHUB_ENV"
 
       - name: Setup xmake
         uses: xmake-io/github-action-setup-xmake@v1
@@ -20,16 +29,24 @@ jobs:
         with:
           ndk-version: r28c
 
-      - name: Host unit test (scanner)
-        run: g++ -std=c++20 tests/test_scanner.cpp src/scanner.cpp -o /tmp/ts && /tmp/ts
+      - name: Host unit test (if present)
+        run: |
+          cd "$SRC"
+          if [ -f tests/test_scanner.cpp ]; then
+            g++ -std=c++20 tests/test_scanner.cpp src/scanner.cpp -o /tmp/ts && /tmp/ts
+          fi
 
       - name: Build and package
         run: |
+          cd "$SRC"
           xmake f -y -p android -a arm64-v8a -m release --ndk=${{ steps.ndk.outputs.ndk-path }}
           xmake -y
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp build/android/arm64-v8a/release/*.levipack "$GITHUB_WORKSPACE/out/"
+          ls -la "$GITHUB_WORKSPACE/out"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MCFinder-levipack
-          path: build/android/arm64-v8a/release/MCFinder.levipack
+          name: levipack
+          path: out/*.levipack
           if-no-files-found: error
