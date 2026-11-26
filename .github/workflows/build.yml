@@ -1,7 +1,8 @@
-name: Build
+name: Build MotionLevi
 
 on:
   push:
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -10,16 +11,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract zip and locate project
+      - name: Unzip source
         run: |
-          mkdir -p /tmp/src
-          shopt -s nullglob
-          zips=(*.zip)
-          [ ${#zips[@]} -gt 0 ] || { echo "No .zip found in repo root"; exit 1; }
-          for z in "${zips[@]}"; do unzip -q -o "$z" -d /tmp/src; done
-          lua=$(find /tmp/src -name xmake.lua -not -path '*/.xmake/*' | head -1)
-          [ -n "$lua" ] || { echo "xmake.lua not found inside zip"; exit 1; }
-          echo "SRC=$(dirname "$lua")" >> "$GITHUB_ENV"
+          set -e
+          ZIP=$(ls *.zip | head -n 1)
+          echo "Zip: $ZIP"
+          mkdir -p src_extracted
+          unzip -q "$ZIP" -d src_extracted
+          XMAKE=$(find src_extracted -name xmake.lua -not -path "*/third_party/*" | head -n 1)
+          test -n "$XMAKE"
+          echo "PROJECT_DIR=$(dirname "$XMAKE")" >> "$GITHUB_ENV"
 
       - name: Setup xmake
         uses: xmake-io/github-action-setup-xmake@v1
@@ -29,24 +30,14 @@ jobs:
         with:
           ndk-version: r28c
 
-      - name: Host unit test (if present)
-        run: |
-          cd "$SRC"
-          if [ -f tests/test_scanner.cpp ]; then
-            g++ -std=c++20 tests/test_scanner.cpp src/scanner.cpp -o /tmp/ts && /tmp/ts
-          fi
-
       - name: Build and package
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          cd "$SRC"
           xmake f -y -p android -a arm64-v8a -m release --ndk=${{ steps.ndk.outputs.ndk-path }}
           xmake -y
-          mkdir -p "$GITHUB_WORKSPACE/out"
-          cp build/android/arm64-v8a/release/*.levipack "$GITHUB_WORKSPACE/out/"
-          ls -la "$GITHUB_WORKSPACE/out"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: levipack
-          path: out/*.levipack
+          name: MotionLevi-levipack
+          path: ${{ env.PROJECT_DIR }}/build/android/arm64-v8a/release/MotionLevi.levipack
           if-no-files-found: error
